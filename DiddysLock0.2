@@ -1,0 +1,139 @@
+getgenv().AimLock = {
+    Enabled = false,
+    Prediction = 0.14,
+    TargetPart = "HumanoidRootPart",
+    ToggleKey = "T",
+    LockedTarget = nil
+}
+
+getgenv().SilentAim = {
+    Enabled = true,
+    Prediction = 1.136,
+    TargetPart = "HumanoidRootPart",
+    WallCheck = true,
+    FOV = {
+        Radius = game:GetService("UserInputService").TouchEnabled and 180 or 250, -- Bigger FOV for PC
+        Visible = true
+    }
+}
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+-- GUI
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Parent = game:GetService("CoreGui")
+
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Parent = ScreenGui
+ToggleButton.Size = UDim2.new(0, 150, 0, 40)
+ToggleButton.Position = UDim2.new(0.85, 0, 0.05, 0) -- Slightly to the left
+ToggleButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+ToggleButton.TextColor3 = Color3.fromRGB(25, 25, 112) -- Midnight blue
+ToggleButton.Text = "Diddy OFF"
+ToggleButton.TextScaled = true
+ToggleButton.Font = Enum.Font.GothamBold
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 10) -- Smoother GUI corners
+UICorner.Parent = ToggleButton
+
+local function ToggleAimLock()
+    getgenv().AimLock.Enabled = not getgenv().AimLock.Enabled
+    if not getgenv().AimLock.Enabled then
+        getgenv().AimLock.LockedTarget = nil
+    end
+    ToggleButton.Text = getgenv().AimLock.Enabled and "Diddy ON" or "Diddy OFF"
+end
+
+ToggleButton.MouseButton1Click:Connect(ToggleAimLock)
+
+UserInputService.InputBegan:Connect(function(Input, GameProcessed)
+    if not GameProcessed and Input.KeyCode == Enum.KeyCode[getgenv().AimLock.ToggleKey] then
+        ToggleAimLock()
+    end
+end)
+
+-- FOV Circle
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Color = Color3.fromRGB(230, 230, 250)
+FOVCircle.Thickness = 1.6
+FOVCircle.NumSides = 64
+FOVCircle.Filled = false
+FOVCircle.Radius = getgenv().SilentAim.FOV.Radius
+FOVCircle.Visible = getgenv().SilentAim.FOV.Visible
+FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+RunService.RenderStepped:Connect(function()
+    FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    FOVCircle.Radius = getgenv().SilentAim.FOV.Radius -- Bigger FOV applied
+    FOVCircle.Visible = getgenv().SilentAim.FOV.Visible
+end)
+
+local function GetClosestTarget()
+    if getgenv().AimLock.LockedTarget and getgenv().AimLock.LockedTarget.Character and getgenv().AimLock.LockedTarget.Character:FindFirstChild(getgenv().SilentAim.TargetPart) then
+        return getgenv().AimLock.LockedTarget
+    end
+
+    local Target, Closest = nil, math.huge  
+    for _, Player in pairs(Players:GetPlayers()) do  
+        if Player ~= LocalPlayer and Player.Character and Player.Character:FindFirstChild(getgenv().SilentAim.TargetPart) and Player.Character:FindFirstChild("Humanoid") and Player.Character.Humanoid.Health > 0 then  
+            local TargetPos = Camera:WorldToScreenPoint(Player.Character[getgenv().SilentAim.TargetPart].Position)  
+            local Distance = (Vector2.new(TargetPos.X, TargetPos.Y) - Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)).Magnitude  
+
+            if Distance < Closest and Distance < getgenv().SilentAim.FOV.Radius then  
+                if getgenv().SilentAim.WallCheck then  
+                    local RayOrigin = Camera.CFrame.Position  
+                    local RayDirection = (Player.Character[getgenv().SilentAim.TargetPart].Position - RayOrigin).unit * 500  
+                    local RayParams = RaycastParams.new()  
+                    RayParams.FilterDescendantsInstances = {LocalPlayer.Character}  
+                    RayParams.FilterType = Enum.RaycastFilterType.Blacklist  
+                    local RaycastResult = workspace:Raycast(RayOrigin, RayDirection, RayParams)  
+
+                    if RaycastResult and RaycastResult.Instance:IsDescendantOf(Player.Character) then  
+                        Closest = Distance  
+                        Target = Player  
+                    end  
+                else  
+                    Closest = Distance  
+                    Target = Player  
+                end  
+            end  
+        end  
+    end  
+
+    getgenv().AimLock.LockedTarget = Target  
+    return Target
+end
+
+local OldIndex
+OldIndex = hookmetamethod(game, "__index", function(self, Key)
+    if self:IsA("Mouse") and Key == "Hit" then
+        local Target = GetClosestTarget()
+        if Target and Target.Character and Target.Character:FindFirstChild(getgenv().SilentAim.TargetPart) then
+            local Humanoid = Target.Character:FindFirstChild("Humanoid")
+            if Humanoid and Humanoid.Health > 0 then -- Ignore dead players
+                return Target.Character[getgenv().SilentAim.TargetPart].CFrame + (Target.Character[getgenv().SilentAim.TargetPart].Velocity * getgenv().SilentAim.Prediction)
+            end
+        end
+    end
+    return OldIndex(self, Key)
+end)
+
+RunService.RenderStepped:Connect(function()
+    if getgenv().AimLock.Enabled then
+        local Target = GetClosestTarget()
+        if Target and Target.Character and Target.Character:FindFirstChild(getgenv().AimLock.TargetPart) then
+            local Humanoid = Target.Character:FindFirstChild("Humanoid")
+            if Humanoid and Humanoid.Health > 0 then -- Ignore dead players
+                Camera.CFrame = CFrame.new(Camera.CFrame.Position, Target.Character[getgenv().AimLock.TargetPart].Position + (Target.Character[getgenv().AimLock.TargetPart].Velocity * getgenv().AimLock.Prediction))
+            end
+        else
+            getgenv().AimLock.LockedTarget = nil -- Reset target if invalid
+        end
+    end
+end)
